@@ -33,6 +33,9 @@ GEM
       eventmachine (>= 0.12.4)
     arel (1.0.1)
       activesupport (~> 3.0.0)
+    async_sinatra (0.4.0)
+      rack (>= 1.2.1)
+      sinatra (>= 1.0)
     builder (2.1.2)
     daemon-kit (0.1.8.1)
       eventmachine (>= 0.12.10)
@@ -118,6 +121,7 @@ PLATFORMS
 
 DEPENDENCIES
   amqp
+  async_sinatra
   daemon-kit
   em-http-request
   em-websocket

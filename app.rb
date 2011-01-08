@@ -1,5 +1,6 @@
 require 'rubygems'
 require 'sinatra'
+require 'sinatra/async'
 require 'erb'
 require 'oauth2'
 require 'em-websocket'
@@ -42,10 +43,12 @@ module RR
     CLIENT_LOCAL_SECRET  = github_config["client_local_secret"]
     AUTH_URL             = "https://github.com/login/oauth/authorize"
     ACCESS_TOKEN_PATH    = "https://github.com/login/oauth/access_token"
+
+    register Sinatra::Async
     
     before do
-      #AMQP.connect(:host => "localhost")
       if session[:session_key]
+        puts "Found session key: #{session[:session_key]}"
         sess = UserSession.find_by_session_key(session[:session_key])
         if sess
           @current_user = sess.user
@@ -58,12 +61,15 @@ module RR
     end
 
   
-    get '/' do
-      @oauth_link = '/login'
-      @no_header = true unless @current_user
-      @popular = Chat.all.select {|c| !c.repository.private}.sort_by {|c| -c.users.size}[0,3]
-      @newest = Chat.order("created_at DESC").all.select {|c| !c.repository.private}[0,3]
-      erb :index
+    aget '/' do
+      body do
+        puts "At base with current user #{@current_user}"
+        @oauth_link = '/login'
+        @no_header = true unless @current_user
+        @popular = Chat.all.select {|c| !c.repository.private}.sort_by {|c| -c.users.size}[0,3]
+        @newest = Chat.order("created_at DESC").all.select {|c| !c.repository.private}[0,3]
+        erb :index
+      end
     end
 
     get '/login_as/:user' do
@@ -96,7 +102,7 @@ module RR
       redirect back
     end
 
-    get '/auth'  do
+    aget '/auth'  do
       access_token = oauth.get_access_token(params[:code], :redirect_uri => oauth_redirect_url)
       token = access_token.token
       
@@ -108,20 +114,25 @@ module RR
         :real_name    => user_json['name'],
         :seen_before  => false
       }
-      user = User.create_from_hash(user_hash, user_hash[:username], token)
-      puts "Finished creating user"
-      sess = UserSession.create(:access_token => token,
-                                :user => user,
-                                :last_seen => Time.now)
+      user = User.create_from_hash(user_hash, user_hash[:username], token) do
+        body do
+          sess = UserSession.create(:access_token => token,
+                                    :user => user,
+                                    :last_seen => Time.now)
 
-      session[:session_key] = sess.session_key
-      
-      if session[:back]
-        b = session[:back]
-        session.delete(:back)
-        redirect b
-      else
-        redirect '/'
+          session[:session_key] = sess.session_key
+
+          redirect_to = '/'
+          if session[:back]
+            b = session[:back]
+            session.delete(:back)
+            redirect_to = b
+          end
+          puts "Redirecting to #{redirect_to}"
+          response.status = 302
+          response.headers['Location'] = redirect_to
+          body = ''
+        end
       end
     end
 

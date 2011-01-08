@@ -24,22 +24,34 @@ class User < ActiveRecord::Base
     }
   end
   
-  def update_repositories(auth_user, token)
-    repos = Github::Repository.find_by_user(self.username, auth_user, token)
-    #if the repo isn't in the db, add it
-    repos.each do |repo|
-      if repo_rec = Repository.find_by_link(repo[:link])
-        repo_rec.update_attributes(repo)
-      else
-        repo_rec = Repository.create_from_hash repo
+  def update_repositories(auth_user, token, &block)
+    handle_repos = proc do |repos|
+      #if the repo isn't in the db, add it
+      repos.each do |repo|
+        if repo_rec = Repository.find_by_link(repo[:link])
+          repo_rec.update_attributes(repo)
+        else
+          repo_rec = Repository.create_from_hash repo
+        end
+        repo_rec.creator = self
+        self.repositories << repo_rec
+        repo_rec.save!
       end
-      repo_rec.creator = self
-      self.repositories << repo_rec
-      repo_rec.save!
     end
+
+    # if we're doing this asynchronously (i.e., a block was supplied)
+    # then we create a new one which first updates the repositories
+    # and then calls the original block
+    block = proc {|repos| handle_repos.call(repos); yield;} if block
+
+    repos = Github::Repository.find_by_user(self.username, auth_user, token, &block)
+
+    # if we're synchronous, we just handle the data which was sent
+    # back by find_by_user
+    handle_repos.call repos unless block
   end
 
-  def self.find_or_create(username)
+  def self.find_or_create username
     user = nil
     begin
       user = self.find_by_username(username)
@@ -59,7 +71,7 @@ class User < ActiveRecord::Base
     create_from_hash(Github::User.find(username), username, token)
   end
   
-  def self.create_from_hash(hash, username, token)
+  def self.create_from_hash(hash, username, token, &block)
     #we may have created the user but not gotten all their info
     user = User.find_by_username(username)
     if user && user.stub
@@ -70,7 +82,7 @@ class User < ActiveRecord::Base
       user = User.new(hash)
     end
     user.save!
-    user.update_repositories(username, token)
+    user.update_repositories(username, token, &block)
     user
   end
 end

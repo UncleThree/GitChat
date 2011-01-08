@@ -1,7 +1,11 @@
+require 'em-http'
 require 'rest_client'
 require 'yaml'
 
 module Github
+  # timeout in seconds for requests
+  REQUEST_TIMEOUT = 10
+  
   class Base
     def self.api_url(point, token)
       #auth = token ? "#{username}%2Ftoken:#{token}@" : ""
@@ -25,13 +29,22 @@ module Github
   end
   
   class Repository
-    def self.find_by_user(user, auth_user=nil, token=nil)
-      puts Github::Base.api_url("/repos/show/#{user}", token)
-      yaml = RestClient.get Github::Base.api_url("/repos/show/#{user}", token)
-      repos = YAML.load(yaml)["repositories"]
-      repos.collect do |repo|
-        repo_hash = hash_for_repo repo
-      end if repos
+    def self.find_by_user(user, auth_user=nil, token=nil, &block)
+      handler = proc do |yaml|
+        repos = YAML.load(yaml)["repositories"]
+        repos.collect do |repo|
+          repo_hash = hash_for_repo repo
+        end if repos
+      end
+      url = Github::Base.api_url("/repos/show/#{user}", token)
+      if block
+        http = EM::HttpRequest.new(url).get :timeout => REQUEST_TIMEOUT
+        http.callback do
+          yield handler.call(http.response)
+        end
+      else
+        handler.call RestClient.get url
+      end
     end
 
     def self.network_for_repo(owner, name, token=nil)
